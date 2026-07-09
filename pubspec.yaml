@@ -93,4 +93,4 @@ flutter:
 flutter_launcher_icons:
   android: true
   ios: true # ถ้าทำลง iOS ด้วยก็ปรับเป็น true ได้เลย
-  image_path: "assets/images/logo.png"
+  image_path: "assets/images/logo2.jpg"
