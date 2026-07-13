@@ -27,8 +27,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
   final DateFormat _dateFormat = DateFormat('dd MMM yyyy, HH:mm น.', 'th_TH');
   DateTime _currentMonth = DateTime.now();
   final DateFormat _monthFormat = DateFormat('MMMM yyyy', 'th_TH');
+  final DateFormat _rangeFormat = DateFormat('d MMM yy', 'th_TH');
+  DateTimeRange? _selectedDateRange;
 
   Widget _buildMonthSelector() {
+    if (_selectedDateRange != null) {
+      return const SizedBox.shrink(); // Hide month selector when custom range is active
+    }
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final textColor = isDark ? const Color(0xFFF1F5F9) : const Color(0xFF1E293B);
     final buttonColor = isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B);
@@ -66,11 +71,39 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  Widget _buildBudgetAlertBanner() {
-    final balance = _controller.balanceForMonth(_currentMonth);
-    final totalIncome = _controller.totalIncomeForMonth(_currentMonth);
-    final totalExpense = _controller.totalExpenseForMonth(_currentMonth);
-    
+  Future<void> _selectCustomDateRange() async {
+    final DateTimeRange? picked = await showDateRangePicker(
+      context: context,
+      initialDateRange: _selectedDateRange ?? DateTimeRange(
+        start: DateTime.now().subtract(const Duration(days: 7)),
+        end: DateTime.now(),
+      ),
+      firstDate: DateTime(2020),
+      lastDate: DateTime(2030),
+      builder: (context, child) {
+        final isDark = Theme.of(context).brightness == Brightness.dark;
+        return Theme(
+          data: Theme.of(context).copyWith(
+            colorScheme: ColorScheme.light(
+              primary: Theme.of(context).colorScheme.primary,
+              onPrimary: Colors.white,
+              surface: isDark ? const Color(0xFF1E293B) : Colors.white,
+              onSurface: isDark ? const Color(0xFFF1F5F9) : const Color(0xFF1E293B),
+            ),
+          ),
+          child: child!,
+        );
+      },
+    );
+
+    if (picked != null) {
+      setState(() {
+        _selectedDateRange = picked;
+      });
+    }
+  }
+
+  Widget _buildBudgetAlertBanner(double balance, double totalIncome, double totalExpense) {
     // Only display alert banner if there is some activity (either income or expense)
     if (totalIncome == 0 && totalExpense == 0) {
       return const SizedBox.shrink();
@@ -89,9 +122,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
         : (isDark ? const Color(0xFFA7F3D0) : const Color(0xFF065F46));
     final icon = isOverspent ? Icons.warning_amber_rounded : Icons.check_circle_outline_rounded;
     
+    final String timeWord = _selectedDateRange != null ? 'ช่วงนี้' : 'เดือนนี้';
+
     final message = isOverspent
-        ? 'เดือนนี้ใช้เงินเกินตัวไป ${_currencyFormat.format(balance.abs())}'
-        : 'เดือนนี้มีเงินเหลือเก็บ ${_currencyFormat.format(balance)}';
+        ? '$timeWordใช้เงินเกินตัวไป ${_currencyFormat.format(balance.abs())}'
+        : '$timeWordมีเงินเหลือเก็บ ${_currencyFormat.format(balance)}';
 
     return Container(
       margin: const EdgeInsets.fromLTRB(20, 8, 20, 4),
@@ -254,10 +289,36 @@ class _DashboardScreenState extends State<DashboardScreen> {
       body: ValueListenableBuilder(
         valueListenable: _controller.transactionsNotifier,
         builder: (context, List<TransactionModel> transactions, child) {
-          final filteredTransactions = transactions
-              .where((tx) => tx.timestamp.year == _currentMonth.year &&
-                             tx.timestamp.month == _currentMonth.month)
-              .toList();
+          List<TransactionModel> filteredTransactions;
+          if (_selectedDateRange != null) {
+            final startOfDay = DateTime(_selectedDateRange!.start.year, _selectedDateRange!.start.month, _selectedDateRange!.start.day);
+            final endOfDay = DateTime(_selectedDateRange!.end.year, _selectedDateRange!.end.month, _selectedDateRange!.end.day, 23, 59, 59, 999);
+            filteredTransactions = transactions.where((tx) =>
+              tx.timestamp.isAfter(startOfDay.subtract(const Duration(microseconds: 1))) &&
+              tx.timestamp.isBefore(endOfDay.add(const Duration(microseconds: 1)))
+            ).toList();
+          } else {
+            filteredTransactions = transactions.where((tx) =>
+              tx.timestamp.year == _currentMonth.year &&
+              tx.timestamp.month == _currentMonth.month
+            ).toList();
+          }
+
+          // Calculate summary values for the selected range
+          double balance = 0.0;
+          double totalIncome = 0.0;
+          double totalExpense = 0.0;
+          for (var tx in filteredTransactions) {
+            if (tx.type == 'INCOME') {
+              totalIncome += tx.amount;
+              balance += tx.amount;
+            } else {
+              totalExpense += tx.amount;
+              balance -= tx.amount;
+            }
+          }
+
+          final isDark = Theme.of(context).brightness == Brightness.dark;
 
           return ValueListenableBuilder(
             valueListenable: _controller.tagsNotifier,
@@ -272,23 +333,59 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   _buildMonthSelector(),
                   
                   // --- Dashboard Card ---
-                  _buildBalanceCard(),
+                  _buildBalanceCard(balance, totalIncome, totalExpense),
 
                   // --- Alert Banner ---
-                  _buildBudgetAlertBanner(),
+                  _buildBudgetAlertBanner(balance, totalIncome, totalExpense),
                   
                   // --- Section Header ---
                   Padding(
                     padding: const EdgeInsets.fromLTRB(20, 20, 20, 12),
-                    child: Text(
-                      'รายการธุรกรรมในเดือนนี้',
-                      style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                        color: Theme.of(context).brightness == Brightness.dark 
-                            ? const Color(0xFFF1F5F9) 
-                            : const Color(0xFF1E293B),
-                      ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Expanded(
+                          child: Text(
+                            _selectedDateRange != null
+                                ? 'รายการธุรกรรม (${_rangeFormat.format(_selectedDateRange!.start)} - ${_rangeFormat.format(_selectedDateRange!.end)})'
+                                : 'รายการธุรกรรมในเดือนนี้',
+                            style: TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                              color: isDark ? const Color(0xFFF1F5F9) : const Color(0xFF1E293B),
+                            ),
+                          ),
+                        ),
+                        Row(
+                          children: [
+                            if (_selectedDateRange != null)
+                              IconButton(
+                                icon: const Icon(Icons.clear_rounded, color: Color(0xFFEF4444)),
+                                tooltip: 'ล้างตัวกรองช่วงเวลา',
+                                padding: EdgeInsets.zero,
+                                constraints: const BoxConstraints(),
+                                onPressed: () {
+                                  setState(() {
+                                    _selectedDateRange = null;
+                                  });
+                                },
+                              ),
+                            const SizedBox(width: 8),
+                            IconButton(
+                              icon: Icon(
+                                Icons.calendar_month_rounded,
+                                color: _selectedDateRange != null
+                                    ? Theme.of(context).colorScheme.primary
+                                    : (isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B)),
+                              ),
+                              tooltip: 'เลือกช่วงเวลา',
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(),
+                              onPressed: _selectCustomDateRange,
+                            ),
+                          ],
+                        ),
+                      ],
                     ),
                   ),
 
@@ -342,10 +439,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   // Balance & Income/Expense Card Widget
-  Widget _buildBalanceCard() {
-    final balance = _controller.balanceForMonth(_currentMonth);
-    final totalIncome = _controller.totalIncomeForMonth(_currentMonth);
-    final totalExpense = _controller.totalExpenseForMonth(_currentMonth);
+  Widget _buildBalanceCard(double balance, double totalIncome, double totalExpense) {
 
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
@@ -620,97 +714,109 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ),
         );
       },
-      child: Container(
-        margin: const EdgeInsets.only(bottom: 12),
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: cardBg,
-          borderRadius: BorderRadius.circular(16),
-          boxShadow: [
-            BoxShadow(
-              color: isDark ? Colors.black.withValues(alpha: 0.1) : Colors.black.withValues(alpha: 0.02),
-              blurRadius: 8,
-              offset: const Offset(0, 2),
-            ),
-          ],
-        ),
-        child: Row(
-          children: [
-            // Category Icon
-            Container(
-              height: 48,
-              width: 48,
-              decoration: BoxDecoration(
-                color: iconBg,
-                shape: BoxShape.circle,
+      child: GestureDetector(
+        onTap: () {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => AddTransactionScreen(
+                transactionToEdit: tx,
               ),
-              child: Icon(itemIcon, color: iconColor, size: 24),
             ),
-            const SizedBox(width: 14),
-            
-            // Details
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    tx.note.isNotEmpty ? tx.note : (tag?.label ?? 'ไม่มีบันทึก'),
-                    style: TextStyle(
-                      fontWeight: FontWeight.w600,
-                      fontSize: 15,
-                      color: titleTextColor,
+          );
+        },
+        child: Container(
+          margin: const EdgeInsets.only(bottom: 12),
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: cardBg,
+            borderRadius: BorderRadius.circular(16),
+            boxShadow: [
+              BoxShadow(
+                color: isDark ? Colors.black.withValues(alpha: 0.1) : Colors.black.withValues(alpha: 0.02),
+                blurRadius: 8,
+                offset: const Offset(0, 2),
+              ),
+            ],
+          ),
+          child: Row(
+            children: [
+              // Category Icon
+              Container(
+                height: 48,
+                width: 48,
+                decoration: BoxDecoration(
+                  color: iconBg,
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(itemIcon, color: iconColor, size: 24),
+              ),
+              const SizedBox(width: 14),
+              
+              // Details
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      tx.note.isNotEmpty ? tx.note : (tag?.label ?? 'ไม่มีบันทึก'),
+                      style: TextStyle(
+                        fontWeight: FontWeight.w600,
+                        fontSize: 15,
+                        color: titleTextColor,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                     ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  const SizedBox(height: 4),
-                  Row(
-                    children: [
-                      if (tag != null) ...[
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                          decoration: BoxDecoration(
-                            color: tagBgColor,
-                            borderRadius: BorderRadius.circular(6),
-                          ),
-                          child: Text(
-                            tag.label,
-                            style: TextStyle(
-                              color: tagTextColor,
-                              fontSize: 11,
-                              fontWeight: FontWeight.w500,
+                    const SizedBox(height: 4),
+                    Row(
+                      children: [
+                        if (tag != null) ...[
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: tagBgColor,
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Text(
+                              tag.label,
+                              style: TextStyle(
+                                color: tagTextColor,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w500,
+                              ),
                             ),
                           ),
-                        ),
-                        const SizedBox(width: 6),
-                      ],
-                      Expanded(
-                        child: Text(
-                          _dateFormat.format(tx.timestamp),
-                          style: const TextStyle(
-                            color: Color(0xFF94A3B8),
-                            fontSize: 11,
+                          const SizedBox(width: 6),
+                        ],
+                        Expanded(
+                          child: Text(
+                            _dateFormat.format(tx.timestamp),
+                            style: const TextStyle(
+                              color: Color(0xFF94A3B8),
+                              fontSize: 11,
+                            ),
+                            overflow: TextOverflow.ellipsis,
                           ),
-                          overflow: TextOverflow.ellipsis,
                         ),
-                      ),
-                    ],
-                  ),
-                ],
+                      ],
+                    ),
+                  ],
+                ),
               ),
-            ),
-            const SizedBox(width: 8),
-
-            // Amount
-            Text(
-              '$amountSign${_currencyFormat.format(tx.amount).replaceAll('฿', '')}',
-              style: TextStyle(
-                fontWeight: FontWeight.bold,
-                fontSize: 16,
-                color: amountColor,
+              const SizedBox(width: 8),
+  
+              // Amount
+              Text(
+                '$amountSign${_currencyFormat.format(tx.amount).replaceAll('฿', '')}',
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 16,
+                  color: amountColor,
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -724,41 +830,43 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final subtitleColor = isDark ? const Color(0xFF475569) : const Color(0xFF94A3B8);
 
     return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Container(
-            padding: const EdgeInsets.all(24),
-            decoration: BoxDecoration(
-              color: iconBgColor,
-              shape: BoxShape.circle,
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(24),
+              decoration: BoxDecoration(
+                color: iconBgColor,
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                Icons.receipt_long_rounded,
+                size: 64,
+                color: titleColor,
+              ),
             ),
-            child: Icon(
-              Icons.receipt_long_rounded,
-              size: 64,
-              color: titleColor,
+            const SizedBox(height: 16),
+            Text(
+              'ยังไม่มีรายการธุรกรรมใด ๆ',
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.bold,
+                color: titleColor,
+              ),
             ),
-          ),
-          const SizedBox(height: 16),
-          Text(
-            'ยังไม่มีรายการธุรกรรมใด ๆ',
-            style: TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.bold,
-              color: titleColor,
+            const SizedBox(height: 8),
+            Text(
+              'เริ่มจดบันทึกรายรับ-รายจ่ายของคุณได้ตอนนี้เลย!',
+              style: TextStyle(
+                fontSize: 13,
+                color: subtitleColor,
+              ),
+              textAlign: TextAlign.center,
             ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'เริ่มจดบันทึกรายรับ-รายจ่ายของคุณได้ตอนนี้เลย!',
-            style: TextStyle(
-              fontSize: 13,
-              color: subtitleColor,
-            ),
-            textAlign: TextAlign.center,
-          ),
-          const SizedBox(height: 80), // spacer for FAB
-        ],
+            const SizedBox(height: 40),
+          ],
+        ),
       ),
     );
   }

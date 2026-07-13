@@ -126,6 +126,31 @@ class LocalController {
     await _saveTransactions();
   }
 
+  Future<void> updateTransaction({
+    required String id,
+    required double amount,
+    required String note,
+    required String tagId,
+    required DateTime timestamp,
+    required String type,
+  }) async {
+    final list = List<TransactionModel>.from(transactionsNotifier.value);
+    final index = list.indexWhere((tx) => tx.id == id);
+    if (index != -1) {
+      list[index] = TransactionModel(
+        id: id,
+        type: type,
+        amount: amount,
+        timestamp: timestamp,
+        note: note,
+        tagPath: 'tags/$tagId',
+      );
+      list.sort((a, b) => b.timestamp.compareTo(a.timestamp));
+      transactionsNotifier.value = list;
+      await _saveTransactions();
+    }
+  }
+
   Future<void> addTransaction({
     required double amount,
     required String note,

@@ -2,16 +2,19 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../controllers/local_controller.dart';
 import '../models/tag_model.dart';
+import '../models/transaction_model.dart';
 import 'manage_tags_screen.dart';
 
 class AddTransactionScreen extends StatefulWidget {
   final bool isTab;
   final VoidCallback? onSaveSuccess;
+  final TransactionModel? transactionToEdit;
 
   const AddTransactionScreen({
     super.key,
     this.isTab = false,
     this.onSaveSuccess,
+    this.transactionToEdit,
   });
 
   @override
@@ -30,6 +33,18 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
   DateTime _selectedDate = DateTime.now();
 
   final DateFormat _dateFormat = DateFormat('dd MMMM yyyy - HH:mm น.', 'th_TH');
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.transactionToEdit != null) {
+      final tx = widget.transactionToEdit!;
+      _amountController.text = tx.amount % 1 == 0 ? tx.amount.toInt().toString() : tx.amount.toString();
+      _noteController.text = tx.note;
+      _selectedType = tx.type;
+      _selectedDate = tx.timestamp;
+    }
+  }
 
   @override
   void dispose() {
@@ -103,7 +118,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
       backgroundColor: scaffoldBgColor,
       appBar: AppBar(
         title: Text(
-          'เพิ่มธุรกรรมใหม่',
+          widget.transactionToEdit != null ? 'แก้ไขธุรกรรม' : 'เพิ่มธุรกรรมใหม่',
           style: TextStyle(
             color: titleColor,
             fontWeight: FontWeight.bold,
@@ -131,7 +146,15 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
           }
           // Default to first tag in the list if none selected
           if (_selectedTag == null && filteredTags.isNotEmpty) {
-            _selectedTag = filteredTags.first;
+            if (widget.transactionToEdit != null && widget.transactionToEdit!.type == _selectedType) {
+              final editTagId = widget.transactionToEdit!.tagPath.split('/').last;
+              _selectedTag = filteredTags.firstWhere(
+                (t) => t.id == editTagId,
+                orElse: () => filteredTags.first,
+              );
+            } else {
+              _selectedTag = filteredTags.first;
+            }
           }
 
           return Form(
@@ -529,17 +552,28 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
             final amount = double.parse(_amountController.text);
             
             try {
-              await _controller.addTransaction(
-                amount: amount,
-                note: _noteController.text.trim(),
-                tagId: _selectedTag!.id,
-                timestamp: _selectedDate,
-                type: _selectedType,
-              );
+              if (widget.transactionToEdit != null) {
+                await _controller.updateTransaction(
+                  id: widget.transactionToEdit!.id,
+                  amount: amount,
+                  note: _noteController.text.trim(),
+                  tagId: _selectedTag!.id,
+                  timestamp: _selectedDate,
+                  type: _selectedType,
+                );
+              } else {
+                await _controller.addTransaction(
+                  amount: amount,
+                  note: _noteController.text.trim(),
+                  tagId: _selectedTag!.id,
+                  timestamp: _selectedDate,
+                  type: _selectedType,
+                );
+              }
 
               scaffoldMessenger.showSnackBar(
                 SnackBar(
-                  content: const Text('บันทึกธุรกรรมเสร็จสิ้น'),
+                  content: Text(widget.transactionToEdit != null ? 'แก้ไขธุรกรรมเสร็จสิ้น' : 'บันทึกธุรกรรมเสร็จสิ้น'),
                   backgroundColor: const Color(0xFF10B981),
                   behavior: SnackBarBehavior.floating,
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
@@ -561,7 +595,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
             } catch (e) {
               scaffoldMessenger.showSnackBar(
                 SnackBar(
-                  content: Text('บันทึกธุรกรรมไม่สำเร็จ: $e'),
+                  content: Text('${widget.transactionToEdit != null ? 'แก้ไข' : 'บันทึก'}ธุรกรรมไม่สำเร็จ: $e'),
                   backgroundColor: const Color(0xFFEF4444),
                   behavior: SnackBarBehavior.floating,
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
@@ -576,9 +610,9 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
           elevation: 2,
         ),
-        child: const Text(
-          'บันทึกรายการ',
-          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+        child: Text(
+          widget.transactionToEdit != null ? 'บันทึกการแก้ไข' : 'บันทึกรายการ',
+          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
         ),
       ),
     );
