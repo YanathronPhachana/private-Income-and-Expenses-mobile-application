@@ -5,26 +5,29 @@
 // gestures. You can also use WidgetTester to find child widgets in the widget
 // tree, read text, and verify that the values of widget properties are correct.
 
-import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:intl/date_symbol_data_local.dart';
 import 'package:private_expense_mobileapp_new/main.dart';
 
 void main() {
-  testWidgets('Counter increments smoke test', (WidgetTester tester) async {
+  testWidgets('Dashboard smoke test', (WidgetTester tester) async {
+    // Initialize Thai date formatting for the test environment.
+    await initializeDateFormatting('th_TH', null);
+
     // Build our app and trigger a frame.
     await tester.pumpWidget(const MyApp());
+    await tester.pumpAndSettle();
 
-    // Verify that our counter starts at 0.
-    expect(find.text('0'), findsOneWidget);
-    expect(find.text('1'), findsNothing);
+    // Verify that the title 'กระเป๋าเงินของฉัน' is shown.
+    expect(find.text('กระเป๋าเงินของฉัน'), findsOneWidget);
 
-    // Tap the '+' icon and trigger a frame.
-    await tester.tap(find.byIcon(Icons.add));
-    await tester.pump();
+    // Verify that the empty state is displayed initially.
+    expect(find.text('ยังไม่มีรายการธุรกรรมใด ๆ'), findsOneWidget);
 
-    // Verify that our counter has incremented.
-    expect(find.text('0'), findsNothing);
-    expect(find.text('1'), findsOneWidget);
+    // Verify bottom navigation destinations.
+    expect(find.text('แดชบอร์ด'), findsOneWidget);
+    expect(find.text('บันทึก'), findsOneWidget);
+    expect(find.text('สรุปผล'), findsOneWidget);
   });
 }
